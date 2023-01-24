@@ -1,0 +1,177 @@
+/* groovylint-disable CompileStatic, DuplicateStringLiteral, LineLength, NestedBlockDepth */
+import java.nio.file.Path
+
+/*******************************************************************************
+________________________________________
+# 1. 前提
+________________________________________
+- 細かいセキュリティを考慮していません
+- 例えばソースには秘匿情報や本番情報含めず、別途取得して書き換える、などが必要な場合あり
+
+________________________________________
+# 2. jenkinsfileの構成
+________________________________________
+1. ソースを取得
+2. 設定ファイルの差し替え
+3. ビルド
+4. 出力フォルダに移動
+
+________________________________________
+# 3. jenkinsfileの構成
+________________________________________
+1. 1つのプロジェクトグループは、SPA、API、など複数で構成される
+2. jenkinsスクリプトはプロジェクトごとに完結させたいが、プロジェクトグループのgitソース自体は1つにまとめたい
+3. ビルドスクリプトのフォルダ構成は各プロジェクトは以下になる
+
+jenkins
+  projecta
+    config
+    jenkinsfile
+  projectb
+    config
+    jenkinsfile
+  ...
+********************************************************************************/
+
+/***************************************
+ビルドサーバ予め配置した内容
+***************************************/
+// https://dotnet.microsoft.com/ja-jp/download/dotnet/6.0
+// x64 バイナリ
+String buildCommandPath = 'D:\\jenkinsBuildTools\\dotnet-sdk-6.0.405-win-x64\\dotnet.exe'
+String buildSrcBase = 'D:\\jenkinsBuildSrc'
+String buildSrcPath = null // 変数
+String buildDestPath = 'D:\\jenkinsBuildDest'
+
+/***************************************
+jenkinsfile
+***************************************/
+String jenkinsProjectGroupDir  = 'jenkins'
+String jenkinsProjectDir       = Path.get(jenkinsProjectGroupDir, 'projecta')
+String jenkinsProjectConfigDir = Path.get(jenkinsProjectDir, 'config')
+
+/***************************************
+ソースgit
+***************************************/
+String credentialsId = 'myGitRepoCredential' // 予めJenkinsに登録しておく
+String repoUrl = 'https://github.com/UnlimitedFairytales/CsharpSamples.git'
+
+/***************************************
+pipeline
+***************************************/
+pipeline {
+  /***************************************
+  agent, options, and other
+  ***************************************/
+  agent any
+  options {
+    timestamps()
+    timeout(time: 10, unit: 'MINUTES')
+  }
+
+  /***************************************
+  stages
+  ***************************************/
+  stages {
+    // 1. 前準備
+    stage('1. Preparation') {
+      steps {
+        script {
+          buildSrcPath = Path.get(buildBase, env.JOB_NAME, params.SourceBranch)
+        }
+      }
+    }
+
+    // 2. ジョブ情報
+    stage('2. Print') {
+      steps {
+        echo "buildCommandPath:${buildCommandPath}"
+        echo "buildSrcBase:${buildSrcBase}"
+        echo "buildDestPath:${buildDestPath}"
+        echo ''
+        echo "jenkinsProjectDir:${jenkinsProjectDir}"
+        echo "jenkinsProjectConfigDir:${jenkinsProjectConfigDir}"
+        echo ''
+        echo "${env.JOB_NAME}"
+        // echo "credentialsId:${credentialsId}"
+        echo "Source:${repoUrl}"
+        echo "SourceBranch:${params.SourceBranch}"
+        echo "DeployTarget:${params.DeployTarget}"
+        echo "buildSrcPath:${buildSrcPath}"
+      }
+    }
+
+    // 3. チェックアウト
+    stage('3. Checkout') {
+      options {
+        timeout(time: 5, unit: 'MINUTES')
+      }
+      steps {
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: params.SourceBranch]],
+          doGenerateSubmoduleConfigurations: false,
+          extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: buildSrcPath]],
+          userRemoteConfigs: [[credentialsId: credentialsId, url: repoUrl]]
+        ])
+      }
+    }
+
+    // 4. 設定ファイル変更
+    stage('4. Configurations') {
+      steps {
+        dir("${buildSrcPath}") {
+          script {
+            echo 'dummy'
+          }
+        }
+      }
+    }
+
+    // 5. パッケージの復元
+    stage('5. Restore packages') {
+      steps {
+        dir("${buildSrcPath}") {
+          script {
+            bat "${buildCommandPath} restore"
+          }
+        }
+      }
+    }
+
+    // 6. ビルド
+    stage('6. Build') {
+      steps {
+        dir("${buildSrcPath}") {
+          script {
+            bat "${buildCommandPath} msbuild /t:rebuild"
+          }
+        }
+      }
+    }
+
+    // 7. 発行
+    stage('Publish') {
+      steps {
+        dir("${buildSrcPath}") {
+          script {
+            echo 'dummy'
+          }
+        }
+      }
+    }
+  }
+
+  /***************************************
+  post
+  ***************************************/
+  post {
+    always {
+      dir("${projectDir}") {
+        script {
+          Git.ResetHard(true)
+        }
+      }
+    }
+  }
+}
