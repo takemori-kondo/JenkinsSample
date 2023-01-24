@@ -1,5 +1,5 @@
 /* groovylint-disable CompileStatic, DuplicateStringLiteral, LineLength, NestedBlockDepth */
-import java.nio.file.Path
+import java.nio.file.Paths
 
 /*******************************************************************************
 ________________________________________
@@ -7,6 +7,7 @@ ________________________________________
 ________________________________________
 - 細かいセキュリティを考慮していません
 - 例えばソースには秘匿情報や本番情報含めず、別途取得して書き換える、などが必要な場合あり
+- ジョブ設定のUse Groovy Sandboxも外す必要あり（Pathsを使用するため）
 
 ________________________________________
 # 2. jenkinsfileの構成
@@ -38,8 +39,11 @@ jenkins
 ***************************************/
 // https://dotnet.microsoft.com/ja-jp/download/dotnet/6.0
 // x64 バイナリ
+// dotnet.exeは.NET Framework4.xをビルドやパッケージ解決できない。そのためビルドサンプルは、UnlimitedFairytales.CsharpSamples.ImageSharpSampleだけにしている
 String buildCommandPath = 'D:\\jenkinsBuildTools\\dotnet-sdk-6.0.405-win-x64\\dotnet.exe'
 String buildSrcBase = 'D:\\jenkinsBuildSrc'
+String checkoutPath = null // 変数
+String subPath = 'UnlimitedFairytales.CsharpSamples.ImageSharpSample'
 String buildSrcPath = null // 変数
 String buildDestPath = 'D:\\jenkinsBuildDest'
 
@@ -47,13 +51,13 @@ String buildDestPath = 'D:\\jenkinsBuildDest'
 jenkinsfile
 ***************************************/
 String jenkinsProjectGroupDir  = 'jenkins'
-String jenkinsProjectDir       = Path.get(jenkinsProjectGroupDir, 'projecta')
-String jenkinsProjectConfigDir = Path.get(jenkinsProjectDir, 'config')
+String jenkinsProjectDir       = Paths.get(jenkinsProjectGroupDir, 'projecta')
+String jenkinsProjectConfigDir = Paths.get(jenkinsProjectDir, 'config')
 
 /***************************************
 ソースgit
 ***************************************/
-String credentialsId = 'myGitRepoCredential' // 予めJenkinsに登録しておく
+// String credentialsId = 'myGitRepoCredential' // 予めJenkinsに登録しておく
 String repoUrl = 'https://github.com/UnlimitedFairytales/CsharpSamples.git'
 
 /***************************************
@@ -77,7 +81,12 @@ pipeline {
     stage('1. Preparation') {
       steps {
         script {
-          buildSrcPath = Path.get(buildBase, env.JOB_NAME, params.SourceBranch)
+          checkoutPath = Paths.get(buildSrcBase, env.JOB_NAME, params.SourceBranch)
+          if (subPath != null && subPath != '') {
+            buildSrcPath = Paths.get(buildSrcBase, env.JOB_NAME, params.SourceBranch, subPath)
+          } else {
+            buildSrcPath = checkoutPath
+          }
         }
       }
     }
@@ -111,8 +120,9 @@ pipeline {
           $class: 'GitSCM',
           branches: [[name: params.SourceBranch]],
           doGenerateSubmoduleConfigurations: false,
-          extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: buildSrcPath]],
-          userRemoteConfigs: [[credentialsId: credentialsId, url: repoUrl]]
+          extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: checkoutPath]],
+          // userRemoteConfigs: [[credentialsId: credentialsId, url: repoUrl]]
+          userRemoteConfigs: [[url: repoUrl]]
         ])
       }
     }
@@ -144,7 +154,7 @@ pipeline {
       steps {
         dir("${buildSrcPath}") {
           script {
-            bat "${buildCommandPath} msbuild /t:rebuild"
+            bat "${buildCommandPath} build /t:rebuild"
           }
         }
       }
@@ -157,19 +167,6 @@ pipeline {
           script {
             echo 'dummy'
           }
-        }
-      }
-    }
-  }
-
-  /***************************************
-  post
-  ***************************************/
-  post {
-    always {
-      dir("${projectDir}") {
-        script {
-          Git.ResetHard(true)
         }
       }
     }
